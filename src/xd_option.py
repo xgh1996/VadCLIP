@@ -24,6 +24,9 @@ parser.add_argument('--gt-path', default='list/gt.npy')
 parser.add_argument('--gt-segment-path', default='list/gt_segment.npy')
 parser.add_argument('--gt-label-path', default='list/gt_label.npy')
 
+parser.add_argument('--multi-scales', nargs='+', type=int, default=None)
+parser.add_argument('--stride', default=16, type=int)
+
 parser.add_argument('--lr', default=1e-5)
 parser.add_argument('--scheduler-rate', default=0.1)
 parser.add_argument('--scheduler-milestones', default=[3, 6, 10])

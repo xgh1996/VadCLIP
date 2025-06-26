@@ -70,12 +70,20 @@ def train(model, normal_loader, anomaly_loader, testloader, args, label_map, dev
             normal_features, normal_label, normal_lengths = next(normal_iter)
             anomaly_features, anomaly_label, anomaly_lengths = next(anomaly_iter)
 
-            visual_features = torch.cat([normal_features, anomaly_features], dim=0).to(device)
+            if isinstance(normal_features, (tuple, list)):
+                visual_features = [
+                    torch.cat([n, a], dim=0).to(device)
+                    for n, a in zip(normal_features, anomaly_features)
+                ]
+                feat_lengths = normal_lengths[0].tolist()
+            else:
+                visual_features = torch.cat([normal_features, anomaly_features], dim=0).to(device)
+                feat_lengths = torch.cat([normal_lengths, anomaly_lengths], dim=0).to(device)
+
             text_labels = list(normal_label) + list(anomaly_label)
-            feat_lengths = torch.cat([normal_lengths, anomaly_lengths], dim=0).to(device)
             text_labels = get_batch_label(text_labels, prompt_text, label_map).to(device)
 
-            text_features, logits1, logits2 = model(visual_features, None, prompt_text, feat_lengths) 
+            text_features, logits1, logits2 = model(visual_features, None, prompt_text, feat_lengths)
             #loss1
             loss1 = CLAS2(logits1, text_labels, feat_lengths, device) 
             loss_total1 += loss1.item()
@@ -133,14 +141,49 @@ if __name__ == '__main__':
 
     label_map = dict({'Normal': 'normal', 'Abuse': 'abuse', 'Arrest': 'arrest', 'Arson': 'arson', 'Assault': 'assault', 'Burglary': 'burglary', 'Explosion': 'explosion', 'Fighting': 'fighting', 'RoadAccidents': 'roadAccidents', 'Robbery': 'robbery', 'Shooting': 'shooting', 'Shoplifting': 'shoplifting', 'Stealing': 'stealing', 'Vandalism': 'vandalism'})
 
-    normal_dataset = UCFDataset(args.visual_length, args.train_list, False, label_map, True)
+    normal_dataset = UCFDataset(
+        args.visual_length,
+        args.train_list,
+        False,
+        label_map,
+        True,
+        multi_scales=args.multi_scales,
+        stride=args.stride,
+    )
     normal_loader = DataLoader(normal_dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
-    anomaly_dataset = UCFDataset(args.visual_length, args.train_list, False, label_map, False)
+    anomaly_dataset = UCFDataset(
+        args.visual_length,
+        args.train_list,
+        False,
+        label_map,
+        False,
+        multi_scales=args.multi_scales,
+        stride=args.stride,
+    )
     anomaly_loader = DataLoader(anomaly_dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
 
-    test_dataset = UCFDataset(args.visual_length, args.test_list, True, label_map)
+    test_dataset = UCFDataset(
+        args.visual_length,
+        args.test_list,
+        True,
+        label_map,
+        multi_scales=args.multi_scales,
+        stride=args.stride,
+    )
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
-    model = CLIPVAD(args.classes_num, args.embed_dim, args.visual_length, args.visual_width, args.visual_head, args.visual_layers, args.attn_window, args.prompt_prefix, args.prompt_postfix, device)
+    model = CLIPVAD(
+        args.classes_num,
+        args.embed_dim,
+        args.visual_length,
+        args.visual_width,
+        args.visual_head,
+        args.visual_layers,
+        args.attn_window,
+        args.prompt_prefix,
+        args.prompt_postfix,
+        device,
+        multi_scale=args.multi_scales is not None,
+    )
 
     train(model, normal_loader, anomaly_loader, test_loader, args, label_map, device)

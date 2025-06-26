@@ -104,3 +104,47 @@ def process_split(feat, length):
                 split_feat = np.concatenate([split_feat, pad(feat[i*length:i*length+length, :], length).reshape(1, length, feat.shape[1])], axis=0)
 
         return split_feat, clip_length
+
+
+def sliding_window(feat, window_size, stride):
+    """Generate sliding window clips from a sequence.
+
+    Args:
+        feat (ndarray): feature sequence of shape (T, C).
+        window_size (int): length of each window.
+        stride (int): step size between windows.
+
+    Returns:
+        ndarray: windows of shape (N, window_size, C) where ``N`` is the
+            number of generated windows.
+    """
+    clips = []
+    start = 0
+    while start < feat.shape[0]:
+        end = start + window_size
+        clip = feat[start:end]
+        if clip.shape[0] < window_size:
+            clip = pad(clip, window_size)
+        clips.append(clip)
+        if end >= feat.shape[0]:
+            break
+        start += stride
+    return np.stack(clips, 0)
+
+
+def process_multiscale(feat, window_sizes, stride):
+    """Generate multi-scale sliding window features.
+
+    Args:
+        feat (ndarray): feature sequence of shape (T, C).
+        window_sizes (list[int]): list of window lengths for each scale.
+        stride (int): stride for sliding windows at every scale.
+
+    Returns:
+        list[ndarray]: list of tensors for each scale, each with shape
+            (N_i, window_sizes[i], C).
+    """
+    feats = []
+    for ws in window_sizes:
+        feats.append(sliding_window(feat, ws, stride))
+    return feats

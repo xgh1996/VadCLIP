@@ -67,11 +67,15 @@ def train(model, train_loader, test_loader, args, label_map: dict, device):
         for i, item in enumerate(train_loader):
             step = 0
             visual_feat, text_labels, feat_lengths = item
-            visual_feat = visual_feat.to(device)
-            feat_lengths = feat_lengths.to(device)
+            if isinstance(visual_feat, (tuple, list)):
+                visual_feat = [v.to(device) for v in visual_feat]
+                feat_lengths = feat_lengths[0].tolist()
+            else:
+                visual_feat = visual_feat.to(device)
+                feat_lengths = feat_lengths.to(device)
             text_labels = get_batch_label(text_labels, prompt_text, label_map).to(device)
 
-            text_features, logits1, logits2 = model(visual_feat, None, prompt_text, feat_lengths) 
+            text_features, logits1, logits2 = model(visual_feat, None, prompt_text, feat_lengths)
 
             loss1 = CLAS2(logits1, text_labels, feat_lengths, device) 
             loss_total1 += loss1.item()
@@ -127,11 +131,37 @@ if __name__ == '__main__':
 
     label_map = dict({'A': 'normal', 'B1': 'fighting', 'B2': 'shooting', 'B4': 'riot', 'B5': 'abuse', 'B6': 'car accident', 'G': 'explosion'})
 
-    train_dataset = XDDataset(args.visual_length, args.train_list, False, label_map)
+    train_dataset = XDDataset(
+        args.visual_length,
+        args.train_list,
+        False,
+        label_map,
+        multi_scales=args.multi_scales,
+        stride=args.stride,
+    )
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 
-    test_dataset = XDDataset(args.visual_length, args.test_list, True, label_map)
+    test_dataset = XDDataset(
+        args.visual_length,
+        args.test_list,
+        True,
+        label_map,
+        multi_scales=args.multi_scales,
+        stride=args.stride,
+    )
     test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
 
-    model = CLIPVAD(args.classes_num, args.embed_dim, args.visual_length, args.visual_width, args.visual_head, args.visual_layers, args.attn_window, args.prompt_prefix, args.prompt_postfix, device)
+    model = CLIPVAD(
+        args.classes_num,
+        args.embed_dim,
+        args.visual_length,
+        args.visual_width,
+        args.visual_head,
+        args.visual_layers,
+        args.attn_window,
+        args.prompt_prefix,
+        args.prompt_postfix,
+        device,
+        multi_scale=args.multi_scales is not None,
+    )
     train(model, train_loader, test_loader, args, label_map, device)
