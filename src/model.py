@@ -86,7 +86,7 @@ class CLIPVAD(nn.Module):
             width=visual_width,
             layers=visual_layers,
             heads=visual_head,
-            attn_mask=self.build_attention_mask(self.attn_window)
+            attn_mask=self.build_attention_mask(visual_length)
         )
 
         width = int(visual_width / 2)
@@ -123,17 +123,13 @@ class CLIPVAD(nn.Module):
         nn.init.normal_(self.text_prompt_embeddings.weight, std=0.01)
         nn.init.normal_(self.frame_position_embeddings.weight, std=0.01)
 
-    def build_attention_mask(self, attn_window):
-        # lazily create causal attention mask, with full attention between the vision tokens
-        # pytorch uses additive attention mask; fill with -inf
-        mask = torch.empty(self.visual_length, self.visual_length)
-        mask.fill_(float('-inf'))
-        for i in range(int(self.visual_length / attn_window)):
-            if (i + 1) * attn_window < self.visual_length:
-                mask[i * attn_window: (i + 1) * attn_window, i * attn_window: (i + 1) * attn_window] = 0
-            else:
-                mask[i * attn_window: self.visual_length, i * attn_window: self.visual_length] = 0
-
+    def build_attention_mask(self, length):
+        """Create a causal attention mask using ``self.attn_window`` for a given length."""
+        mask = torch.empty(length, length)
+        mask.fill_(float("-inf"))
+        for start in range(0, length, self.attn_window):
+            end = min(start + self.attn_window, length)
+            mask[start:end, start:end] = 0
         return mask
 
     def adj4(self, x, seq_len):
@@ -162,11 +158,19 @@ class CLIPVAD(nn.Module):
 
     def encode_video(self, images, padding_mask, lengths):
         images = images.to(torch.float)
-        position_ids = torch.arange(self.visual_length, device=self.device)
+        seq_len = images.shape[1]
+
+        # positional embeddings for the actual sequence length
+        position_ids = torch.arange(seq_len, device=self.device)
         position_ids = position_ids.unsqueeze(0).expand(images.shape[0], -1)
         frame_position_embeddings = self.frame_position_embeddings(position_ids)
         frame_position_embeddings = frame_position_embeddings.permute(1, 0, 2)
         images = images.permute(1, 0, 2) + frame_position_embeddings
+
+        # adjust temporal attention mask for the current length
+        mask = self.build_attention_mask(seq_len).to(images.device)
+        for block in self.temporal.resblocks:
+            block.attn_mask = mask
 
         x, _ = self.temporal((images, None))
         x = x.permute(1, 0, 2)
