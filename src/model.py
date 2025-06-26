@@ -68,7 +68,8 @@ class CLIPVAD(nn.Module):
                  attn_window: int,
                  prompt_prefix: int,
                  prompt_postfix: int,
-                 device):
+                 device,
+                 multi_scale:bool = False):
         super().__init__()
 
         self.num_class = num_class
@@ -79,7 +80,7 @@ class CLIPVAD(nn.Module):
         self.prompt_prefix = prompt_prefix
         self.prompt_postfix = prompt_postfix
         self.device = device
-
+        self.multi_scale = multi_scale
         self.temporal = Transformer(
             width=visual_width,
             layers=visual_layers,
@@ -200,25 +201,58 @@ class CLIPVAD(nn.Module):
         return text_features
 
     def forward(self, visual, padding_mask, text, lengths):
-        visual_features = self.encode_video(visual, padding_mask, lengths)
-        logits1 = self.classifier(visual_features + self.mlp2(visual_features))
+        if not self.multi_scale:
+            visual_features = self.encode_video(visual, padding_mask, lengths)
+            logits1 = self.classifier(visual_features + self.mlp2(visual_features))
 
-        text_features_ori = self.encode_textprompt(text)
+            text_features_ori = self.encode_textprompt(text)
 
-        text_features = text_features_ori
-        logits_attn = logits1.permute(0, 2, 1)
-        visual_attn = logits_attn @ visual_features
-        visual_attn = visual_attn / visual_attn.norm(dim=-1, keepdim=True)
-        visual_attn = visual_attn.expand(visual_attn.shape[0], text_features_ori.shape[0], visual_attn.shape[2])
-        text_features = text_features_ori.unsqueeze(0)
-        text_features = text_features.expand(visual_attn.shape[0], text_features.shape[1], text_features.shape[2])
-        text_features = text_features + visual_attn
-        text_features = text_features + self.mlp1(text_features)
+            text_features = text_features_ori
+            logits_attn = logits1.permute(0, 2, 1)
+            visual_attn = logits_attn @ visual_features
+            visual_attn = visual_attn / visual_attn.norm(dim=-1, keepdim=True)
+            visual_attn = visual_attn.expand(visual_attn.shape[0], text_features_ori.shape[0], visual_attn.shape[2])
+            text_features = text_features_ori.unsqueeze(0)
+            text_features = text_features.expand(visual_attn.shape[0], text_features.shape[1], text_features.shape[2])
+            text_features = text_features + visual_attn
+            text_features = text_features + self.mlp1(text_features)
 
-        visual_features_norm = visual_features / visual_features.norm(dim=-1, keepdim=True)
-        text_features_norm = text_features / text_features.norm(dim=-1, keepdim=True)
-        text_features_norm = text_features_norm.permute(0, 2, 1)
-        logits2 = visual_features_norm @ text_features_norm.type(visual_features_norm.dtype) / 0.07
+            visual_features_norm = visual_features / visual_features.norm(dim=-1, keepdim=True)
+            text_features_norm = text_features / text_features.norm(dim=-1, keepdim=True)
+            text_features_norm = text_features_norm.permute(0, 2, 1)
+            logits2 = visual_features_norm @ text_features_norm.type(visual_features_norm.dtype) / 0.07
 
-        return text_features_ori, logits1, logits2
-    
+            return text_features_ori, logits1, logits2
+        else:
+            text_features_ori = self.encode_textprompt(text)
+            logits1_sum = None
+            logits2_sum = None
+            for v, l in zip(visual, lengths):
+                vf = self.encode_video(v, None, l)
+                l1 = self.classifier(vf + self.mlp2(vf))
+
+                text_features = text_features_ori
+                logits_attn = l1.permute(0, 2, 1)
+                visual_attn = logits_attn @ vf
+                visual_attn = visual_attn / visual_attn.norm(dim=-1, keepdim=True)
+                visual_attn = visual_attn.expand(visual_attn.shape[0], text_features_ori.shape[0], visual_attn.shape[2])
+                text_features = text_features_ori.unsqueeze(0)
+                text_features = text_features.expand(visual_attn.shape[0], text_features.shape[1], text_features.shape[2])
+                text_features = text_features + visual_attn
+                text_features = text_features + self.mlp1(text_features)
+
+                visual_features_norm = vf / vf.norm(dim=-1, keepdim=True)
+                text_features_norm = text_features / text_features.norm(dim=-1, keepdim=True)
+                text_features_norm = text_features_norm.permute(0, 2, 1)
+                l2 = visual_features_norm @ text_features_norm.type(visual_features_norm.dtype) / 0.07
+
+                if logits1_sum is None:
+                    logits1_sum = l1
+                    logits2_sum = l2
+                else:
+                    logits1_sum += l1
+                    logits2_sum += l2
+
+            logits1 = logits1_sum / len(visual)
+            logits2 = logits2_sum / len(visual)
+            return text_features_ori, logits1, logits2

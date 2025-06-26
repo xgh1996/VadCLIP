@@ -12,7 +12,7 @@ from utils.ucf_detectionMAP import getDetectionMAP as dmAP
 import ucf_option
 
 def test(model, testdataloader, maxlen, prompt_text, gt, gtsegments, gtlabels, device):
-    
+
     model.to(device)
     model.eval()
 
